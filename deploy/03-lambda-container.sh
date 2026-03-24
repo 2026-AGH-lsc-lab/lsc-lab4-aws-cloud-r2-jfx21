@@ -2,24 +2,36 @@
 set -euo pipefail
 source "$(dirname "$0")/00-config.sh"
 
-echo "=== Step 3: Lambda Container Image Deployment ==="
+echo "=== Step 3: Lambda Container Deployment (Podman) ==="
 
-# Create or update Lambda function from ECR image
-echo "Creating Lambda function (container)..."
+# 1. Build the image for Intel (x86_64)
+echo "Building Container Image for linux/amd64..."
+podman build --platform linux/amd64 -t "${ECR_URI}:latest" "$WORKLOAD_DIR"
+
+# 2. Login and Push to ECR
+echo "Pushing image to ECR..."
+aws ecr get-login-password --region "$AWS_REGION" | podman login --username AWS --password-stdin "${ECR_URI}"
+podman push "${ECR_URI}:latest"
+
+# 3. Deploy to Lambda
+echo "Deploying to Lambda..."
 if aws lambda get-function --function-name "$LAMBDA_CONTAINER_NAME" --region "$AWS_REGION" &>/dev/null; then
-    echo "Function exists, updating code..."
+    echo "Updating Lambda code..."
     aws lambda update-function-code \
         --function-name "$LAMBDA_CONTAINER_NAME" \
         --image-uri "${ECR_URI}:latest" \
         --region "$AWS_REGION" --output text --query 'FunctionArn'
-    sleep 5
+    
+    echo "Waiting for update to finish..."
+    aws lambda wait function-updated-v2 --function-name "$LAMBDA_CONTAINER_NAME" --region "$AWS_REGION"
+
     aws lambda update-function-configuration \
         --function-name "$LAMBDA_CONTAINER_NAME" \
         --memory-size "$LAMBDA_MEMORY" \
         --timeout "$LAMBDA_TIMEOUT" \
-        --tracing-config Mode=Active \
         --region "$AWS_REGION" --output text --query 'FunctionArn'
 else
+    echo "Creating new Lambda function..."
     aws lambda create-function \
         --function-name "$LAMBDA_CONTAINER_NAME" \
         --package-type Image \
@@ -27,12 +39,9 @@ else
         --role "$LAB_ROLE_ARN" \
         --timeout "$LAMBDA_TIMEOUT" \
         --memory-size "$LAMBDA_MEMORY" \
-        --tracing-config Mode=Active \
         --region "$AWS_REGION" --output text --query 'FunctionArn'
 fi
 
-# Wait for function to be active
-echo "Waiting for function to become active..."
 aws lambda wait function-active-v2 --function-name "$LAMBDA_CONTAINER_NAME" --region "$AWS_REGION"
 
 # Create Function URL
@@ -58,4 +67,4 @@ if [ -z "$FUNC_URL" ] || [ "$FUNC_URL" = "None" ]; then
         --region "$AWS_REGION" || true
 fi
 
-echo "=== Lambda Container done. Function URL: ${FUNC_URL} ==="
+echo "=== Container Deployment Done ==="

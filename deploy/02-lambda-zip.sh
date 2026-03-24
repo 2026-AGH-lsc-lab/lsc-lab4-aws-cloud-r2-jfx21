@@ -9,7 +9,8 @@ echo "Building NumPy Lambda layer..."
 LAYER_DIR="${DEPLOY_DIR}/lambda-layer"
 rm -f "${LAYER_DIR}/numpy-layer.zip"
 
-docker run --rm -v "${LAYER_DIR}:/out" python:3.12-slim \
+# Force the Intel platform and add :Z for Mac/Podman volume permissions
+podman run --rm --platform linux/amd64 -v "${LAYER_DIR}:/out:Z" python:3.12-slim \
     bash -c "apt-get update -qq && apt-get install -y -qq zip >/dev/null 2>&1 && pip install --quiet numpy==1.26.4 -t /tmp/python && cd /tmp && zip -qr /out/numpy-layer.zip python"
 
 echo "Publishing Lambda layer..."

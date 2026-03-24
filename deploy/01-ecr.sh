@@ -2,27 +2,29 @@
 set -euo pipefail
 source "$(dirname "$0")/00-config.sh"
 
-echo "=== Step 1: ECR Repository & Docker Image ==="
+echo "=== Step 1: ECR Repository & Podman Image ==="
 
-# Create ECR repository (ignore if exists)
+# 1. Create ECR repository (ignore if exists)
 echo "Creating ECR repository..."
 aws ecr create-repository \
     --repository-name "$ECR_REPO_NAME" \
     --region "$AWS_REGION" 2>/dev/null || echo "Repository already exists."
 
-# Docker login to ECR
+# 2. Podman login to ECR
+# Note: Using ${ECR_URI%%/*} extracts the registry hostname from your full URI
 echo "Logging into ECR..."
+REGISTRY_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 aws ecr get-login-password --region "$AWS_REGION" \
-    | docker login --username AWS --password-stdin \
-    "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    | podman login --username AWS --password-stdin "$REGISTRY_URL"
 
-# Build image
-echo "Building Docker image..."
-docker build -t "${ECR_REPO_NAME}:latest" "$WORKLOAD_DIR"
+# 3. Build image (FORCING AMD64)
+# This is the "Magic Sauce" that prevents the Manifest error on Mac
+echo "Building image for linux/amd64..."
+podman build --platform linux/amd64 -t "${ECR_REPO_NAME}:latest" "$WORKLOAD_DIR"
 
-# Tag and push
+# 4. Tag and push
 echo "Pushing image to ECR..."
-docker tag "${ECR_REPO_NAME}:latest" "${ECR_URI}:latest"
-docker push "${ECR_URI}:latest"
+podman tag "${ECR_REPO_NAME}:latest" "${ECR_URI}:latest"
+podman push "${ECR_URI}:latest"
 
 echo "=== ECR done. Image URI: ${ECR_URI}:latest ==="
